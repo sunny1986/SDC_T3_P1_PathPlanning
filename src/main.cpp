@@ -272,8 +272,9 @@ int main() {
           		ptsx.push_back(prev_car_x);
           		ptsx.push_back(ref_x);
 
-          		ptsx.push_back(prev_car_y);
-          		ptsx.push_back(ref_y);
+          		ptsy.push_back(prev_car_y);
+          		ptsy.push_back(ref_y);
+
           	}
           	// Use car's prev end point as ref
           	else{
@@ -292,6 +293,7 @@ int main() {
 
           		ptsy.push_back(prev_ref_y);
           		ptsy.push_back(ref_y);
+
           	}
 
           	// In Frenet add 3 waypoints spaced 30m apart ahead of the starting ref
@@ -307,6 +309,9 @@ int main() {
           	ptsy.push_back(next_wp1[1]);
           	ptsy.push_back(next_wp2[1]);
 
+          	
+//          	std::cout << "x size" << ptsx.size() << endl;
+  
           	for(int i=0; i < ptsx.size(); i++){
           		
           		// shift car ref angle to 0 deg
