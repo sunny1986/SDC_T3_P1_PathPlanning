@@ -9,7 +9,6 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 #include "spline.h"
-// pprerna : 7753449348
 
 using namespace std;
 
@@ -202,7 +201,15 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+
+//start in lane 1
+int lane = 1;
+
+// have a reference velocity to target
+double ref_vel = 0.0; //mph
+          	
+
+h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy,&ref_vel,&lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -219,8 +226,8 @@ int main() {
         string event = j[0].get<string>();
         
         if (event == "telemetry") {
-          // j[1] is the data JSON object
-          
+          // j[1] is the data JSON object          	       	
+        	
         	// Main car's localization Data
           	double car_x = j[1]["x"];
           	double car_y = j[1]["y"];
@@ -246,12 +253,62 @@ int main() {
 
        		int prev_size = previous_path_x.size();
 
-    		//start in lane 1
-			int lane = 1;
+       		if (prev_size > 0)
+       		{
+       			car_s = end_path_s;
+       		}
 
-			// have a reference velocity to target
-			double ref_vel = 49.5; //mph
-          	
+       		bool too_close = false;
+
+       		//find ref_v to use if there are other cars in the same lane
+       		for (int i = 0; i < sensor_fusion.size(); i++)
+       		{
+       			// if car is in my lane
+       			float d = sensor_fusion[i][6]; //check ith car's d value
+       			if (d < (2+4*lane+2) && d > (2+4*lane-2))
+       			{
+       				double vx = sensor_fusion[i][3];
+       				double vy = sensor_fusion[i][4];
+       				double check_speed = sqrt(vx*vx+vy*vy);
+       				double check_car_s = sensor_fusion[i][5];
+
+       				// if using prev points, can project s values for that car
+       				// into the future to check if our car's path would be there
+       				check_car_s += ((double)prev_size*0.02*check_speed);
+
+       				//check s values greater than mine and the s gap between mine
+       				//the car in front of me and within 30 m of me
+       				// So check if the car in the future is going to be within 30 mt of where
+       				// we're going to be in the future, then either slow down or try to change lanes
+       				if ((check_car_s > car_s) && ((check_car_s-car_s) < 30))
+       				{
+       					//write some code here to lower the ref velocity so that we
+       					//dont crash into car ahead of us. can also flag to try
+       					//to change lanes if there is a car ahead of us
+       					//ref_vel = 29.5; //mph
+       					too_close = true;
+       					if (lane > 0)
+       					{
+       						lane = 0; // shift to left lane. This is used in generating the path using spline when we
+       								  // create 3 waypoints
+       					}
+       				}
+       			}
+
+       		}
+
+       		if (too_close)
+       		{
+       			ref_vel -= 0.424;   //this is equivalent to acc of 5 m/s^2 hence incr vel gradually
+       								// instead of the sudden acc and decel
+       		}
+       		else if(ref_vel < 49.5)
+       		{
+       			ref_vel += 0.325;	// gradually incr the velocity if speed less than speed limit
+       		}
+
+       		std::cout << "ref_vel = " << ref_vel << endl;
+
           	vector<double> ptsx;
           	vector<double> ptsy;
 
@@ -266,8 +323,8 @@ int main() {
           	// If the previous size is almost empty, use the car as the starting ref
           	if(prev_size < 2){
           		// Create another point that is backwards in time compared to where the car is at
-          		double prev_car_x = car_x - cos(car_x);
-          		double prev_car_y = car_y - sin(car_y);
+          		double prev_car_x = car_x - cos(ref_yaw);
+          		double prev_car_y = car_y - sin(ref_yaw);
 
           		ptsx.push_back(prev_car_x);
           		ptsx.push_back(ref_x);
@@ -275,6 +332,10 @@ int main() {
           		ptsy.push_back(prev_car_y);
           		ptsy.push_back(ref_y);
 
+          		/*
+              	std::cout << "ref_x= " << ref_x << endl;
+	          	std::cout << "ref_y= " << ref_y << endl;
+				*/
           	}
           	// Use car's prev end point as ref
           	else{
@@ -285,7 +346,7 @@ int main() {
 
           		double prev_ref_x = previous_path_x[prev_size-2];
           		double prev_ref_y = previous_path_y[prev_size-2];
-          		ref_yaw = atan2(ref_y - prev_ref_y, ref_x - prev_ref_y);
+          		ref_yaw = atan2(ref_y - prev_ref_y, ref_x - prev_ref_x);
 
           		// Use two points that make the path tangent to the prev path's end point
           		ptsx.push_back(prev_ref_x);
@@ -307,11 +368,8 @@ int main() {
 
           	ptsy.push_back(next_wp0[1]);
           	ptsy.push_back(next_wp1[1]);
-          	ptsy.push_back(next_wp2[1]);
-
-          	
-//          	std::cout << "x size" << ptsx.size() << endl;
-  
+          	ptsy.push_back(next_wp2[1]);          
+  			
           	for(int i=0; i < ptsx.size(); i++){
           		
           		// shift car ref angle to 0 deg
@@ -322,9 +380,9 @@ int main() {
           		ptsy[i] = (shift_x*sin(0-ref_yaw) + shift_y*cos(0-ref_yaw));
 
           	}
-
+          	
           	// create a spline
-          	tk::spline s;
+          	tk::spline s;          	
 
           	// set (x,y) points to the spline. i.e. add x,y points to the spline
           	s.set_points(ptsx,ptsy);
@@ -339,7 +397,7 @@ int main() {
           		next_x_vals.push_back(previous_path_x[i]);
           		next_y_vals.push_back(previous_path_y[i]);
           	}
-
+          	          	          	
           	// look at the "visual aid" that is talked about in the Q&A video
           	// Calculate how to break up spline points so that we travel at our desired velocity
           	double target_x = 30.0;
@@ -351,8 +409,8 @@ int main() {
           	// Fill up rest of our path planner after filling it up with prev path points, here we will always 
           	// have 50 points
 
-          	for (int i = 1; i <= 50-previous_path_x.size() ; ++i)
-          	{
+          	for (int i = 1; i <= 50-previous_path_x.size() ; i++)
+          	{          		
           		double N = (target_dist/(0.02*ref_vel/2.24)); // conv from mph to m/s
           		double x_point = x_add_on + (target_dist/N);
           		double y_point = s(x_point);
@@ -367,40 +425,22 @@ int main() {
           		x_point = (x_ref*cos(ref_yaw)-y_ref*sin(ref_yaw));
           		y_point = (x_ref*sin(ref_yaw)+y_ref*cos(ref_yaw));
 
-          		x_point += x_ref;
-          		y_point += y_ref;
+          		x_point += ref_x;
+          		y_point += ref_y;
 
           		next_x_vals.push_back(x_point);
           		next_y_vals.push_back(y_point);
           	}
-
+          	
           	json msgJson;
-
-
-
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-
-			double dist_inc = 0.3;
-		    for(int i = 0; i < 50; i++)
-		    {
-		    	double next_s = car_s + (i+1)*dist_inc;
-		    	double next_d = 6;
-		    	vector<double> xy = getXY(next_s, next_d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-
-		        next_x_vals.push_back(xy[0]);
-		        next_y_vals.push_back(xy[1]);
-		    }
-
-		    std::cout << "next_x_vals = " << next_x_vals[0] << endl;
-		    std::cout << "next_y_vals = " << next_y_vals[0] << endl;
-
+          	
           	msgJson["next_x"] = next_x_vals;
-          	msgJson["next_y"] = next_y_vals;
+          	msgJson["next_y"] = next_y_vals;          	
 
-          	auto msg = "42[\"control\","+ msgJson.dump()+"]";
+          	auto msg = "42[\"control\","+ msgJson.dump()+"]";          	
 
           	//this_thread::sleep_for(chrono::milliseconds(1000));
-          	ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+          	ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);          	
           
         }
       } else {
