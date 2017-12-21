@@ -259,6 +259,8 @@ h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_d
        		}
 
        		bool too_close = false;
+       		bool leftlanechange_allowed = true;
+       		bool rightlanechange_allowed = true;
 
        		//find ref_v to use if there are other cars in the same lane
        		for (int i = 0; i < sensor_fusion.size(); i++)
@@ -286,29 +288,118 @@ h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_d
        					//dont crash into car ahead of us. can also flag to try
        					//to change lanes if there is a car ahead of us
        					//ref_vel = 29.5; //mph
-       					too_close = true;
-       					if (lane > 0)
-       					{
-       						lane = 0; // shift to left lane. This is used in generating the path using spline when we
-       								  // create 3 waypoints
+       					too_close = true;       					
+       					cout << "##########################" << endl;
+       					cout << "car_s = " << car_s << endl;
+       					cout << "check_car_s = " << check_car_s << endl;       					
+
+       					if (lane == 1)
+       					{                  
+       						for (int i = 0; i < sensor_fusion.size(); i++)
+       						{
+       							float d = sensor_fusion[i][6]; //check ith car's d value
+       							double check_car_s = sensor_fusion[i][5];
+       							if (d > 0 && d < 4) // car is in Left lane
+       							{       								
+       								if ((check_car_s > (car_s - 20)) && (check_car_s < (car_s + 20)))
+       								{	
+       									cout << "L check_car_s = " << check_car_s << endl;
+       									cout << " car " << i << " too close to change lane" << endl;       									
+       									leftlanechange_allowed = false;
+       								}
+       							}
+       							else if (d > 8 && d < 12) // car is in Right lane
+       							{       							
+       								if ((check_car_s > (car_s - 20)) && (check_car_s < (car_s + 20)))
+       								{
+       									cout << "R check_car_s = " << check_car_s << endl;
+       									cout << " car " << i << " too close to change lane" << endl;
+       									rightlanechange_allowed = false;
+       								}
+       							}
+       						}
+
+       						cout << "leftlanechange_allowed = " << leftlanechange_allowed << endl;
+       						cout << "rightlanechange_allowed = " << rightlanechange_allowed << endl;
+
+       						if(leftlanechange_allowed || (leftlanechange_allowed && leftlanechange_allowed))
+       						{
+								    lane = 0; // shift to left lane. This variable is used in generating the path using spline when we
+       									  	// create 3 waypoints
+       						}
+
+       						if(rightlanechange_allowed)
+       						{
+								    lane = 2; // shift to right lane.
+       						}
+       						
        					}
+                
+                if(lane == 0)
+                {
+                  for (int i = 0; i < sensor_fusion.size(); i++)
+                  {
+                    float d = sensor_fusion[i][6]; //check ith car's d value
+                    double check_car_s = sensor_fusion[i][5];
+                    if (d > 4 && d < 8) // car is in Center lane
+                    { 
+                      if ((check_car_s > (car_s - 20)) && (check_car_s < (car_s + 20)))
+                      { 
+                        cout << "C check_car_s = " << check_car_s << endl;
+                        cout << " car " << i << " too close to change lane" << endl;                        
+                        rightlanechange_allowed = false;
+                      }
+                    }
+                  }
+                  
+                  cout << "rightlanechange_allowed = " << rightlanechange_allowed << endl;
+
+                  if(rightlanechange_allowed)
+                  {
+                    lane = 1; // shift to center lane.
+                  }
+                }
+
+                if(lane == 2)
+                {
+                  for (int i = 0; i < sensor_fusion.size(); i++)
+                  {
+                    float d = sensor_fusion[i][6]; //check ith car's d value
+                    double check_car_s = sensor_fusion[i][5];
+                    if (d > 4 && d < 8) // car is in Center lane
+                    { 
+                      if ((check_car_s > (car_s - 20)) && (check_car_s < (car_s + 20)))
+                      { 
+                        cout << "C check_car_s = " << check_car_s << endl;
+                        cout << " car " << i << " too close to change lane" << endl;                        
+                        leftlanechange_allowed = false;
+                      }
+                    }
+                  }
+                  
+                  cout << "leftlanechange_allowed = " << leftlanechange_allowed << endl;
+
+                  if(leftlanechange_allowed)
+                  {
+                    lane = 1; // shift to center lane.
+                  }
+                }                
        				}
        			}
 
        		}
 
+       		// Accel decel control
        		if (too_close)
        		{
-       			ref_vel -= 0.424;   //this is equivalent to acc of 5 m/s^2 hence incr vel gradually
+       			ref_vel -= 0.424;   //this is equivalent to acc of approx 6 m/s^2 hence incr vel gradually
        								// instead of the sudden acc and decel
        		}
        		else if(ref_vel < 49.5)
        		{
        			ref_vel += 0.325;	// gradually incr the velocity if speed less than speed limit
        		}
-
-       		std::cout << "ref_vel = " << ref_vel << endl;
-
+       		
           	vector<double> ptsx;
           	vector<double> ptsy;
 
